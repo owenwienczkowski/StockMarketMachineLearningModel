@@ -15,3 +15,5 @@ The specific objectives of the project are to:
 
 The dataset used to train this model can be accessed here:
 https://www.kaggle.com/datasets/jacksoncrow/stock-market-dataset
+    
+    for this dataset, etfs/PRN.csv was removed for formatting reasons
