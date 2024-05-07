@@ -4,19 +4,19 @@ os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 import tensorflow as tf
 import pandas as pd
 import numpy as np
-from keras import Sequential
+from keras.regularizers import l1_l2, l2
+from keras.callbacks import EarlyStopping
 from keras.models import Model
-from keras.layers import Input, LSTM, Dense, Dropout, Bidirectional, Attention
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
+from keras.layers import Input, LSTM, Dense, Dropout, Bidirectional, Attention, Conv1D, MaxPooling1D, Flatten
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.model_selection import train_test_split, KFold
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 
 
 # Base path to the labeled data folder. Switch to "small_data_with_solution" for a quicker runtime.
 base_folder_path = 'small_data_with_solution'
-# base_folder_path = 'medium_data_with_solution'
+# base_folder_path = 'data_with_solution'
 
 
 # Subfolders within the data folder
@@ -54,7 +54,7 @@ combined_df['Price_Diff'] = combined_df['Adj Close'].diff()
 combined_df.dropna(inplace=True)
 
 # Normalize the data
-scaler = MinMaxScaler(feature_range=(0, 1))
+scaler = StandardScaler()
 scaled_data = scaler.fit_transform(combined_df['Price_Diff'].values.reshape(-1, 1))
 
 # Prepare the sequences for LSTM with 'Price_Diff' as the target
@@ -74,10 +74,15 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 # Define the input layer
 input_layer = Input(shape=(sequence_length, 1))
 
+# Add a 1D Convolutional layer for feature extraction
+conv_out = Conv1D(filters=64, kernel_size=3, activation='relu')(input_layer)
+conv_out = MaxPooling1D(pool_size=2)(conv_out)
+conv_out = Flatten()(conv_out)
+
 # Build the LSTM layers
-lstm_out = Bidirectional(LSTM(units=50, return_sequences=True))(input_layer)
-lstm_out = Dropout(0.2)(lstm_out)
-lstm_out = Bidirectional(LSTM(units=50, return_sequences=True))(lstm_out)
+lstm_out = Bidirectional(LSTM(units=125, return_sequences=True))(input_layer)
+lstm_out = Dropout(0.5)(lstm_out)  # Increase dropout rate to 0.5
+lstm_out = Bidirectional(LSTM(units=125, return_sequences=True))(lstm_out)
 
 # Apply the Attention mechanism
 query_encoding = Dense(128)(lstm_out)
@@ -95,49 +100,69 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 
 # Train the model with a learning rate scheduler
 def scheduler(epoch, lr):
-    if epoch < 10:
+    if epoch < 2:
         return float(lr)
     else:
         return float(lr * tf.math.exp(-0.1))
 
-
 callback = tf.keras.callbacks.LearningRateScheduler(scheduler)
 
-# Train the model and save the history
-history = model.fit(X_train, y_train, epochs=2, batch_size=32, validation_split=0.2, callbacks=[callback])
+# Define the K-Fold Cross Validator
+kfold = KFold(n_splits=2, shuffle=True)
 
-# Predictions
-predicted_stock_price = model.predict(X_test)
-# Reshape from 3D to 2D
-predicted_stock_price_2d = predicted_stock_price.reshape(-1, predicted_stock_price.shape[2])
+# Initialize variables to store cross-validation results
+cv_mae, cv_mse, cv_rmse, cv_r2 = [], [], [], []
 
-predicted_stock_price_inversed = scaler.inverse_transform(predicted_stock_price_2d)
+# Loop through the indices the split() method returns
+for train_index, test_index in kfold.split(X):
+    # Generate training and testing sets for each fold
+    X_train, X_test = X[train_index], X[test_index]
+    y_train, y_test = y[train_index], y[test_index]
+    
+    # Define early stopping callback
+    early_stopping = EarlyStopping(monitor='val_loss', patience=2)
 
-predicted_stock_price = predicted_stock_price_inversed.reshape(predicted_stock_price.shape[0], predicted_stock_price.shape[1], -1)
-# Evaluate the model using the test set
-y_true = scaler.inverse_transform(y_test.reshape(-1, 1))
-y_pred = predicted_stock_price
+    # Add Gaussian noise to input data
+    noise_factor = 0.1
+    X_train_noisy = X_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=X_train.shape) 
+    X_train_noisy = np.clip(X_train_noisy, 0., 1.)
 
-# Print the model's guess and the correct solution for each prediction
-for i in range(len(y_pred)):
-    # Extract the scalar value from the array for formatting
-    model_guess = y_pred[i][0].item()  # Convert numpy float to Python scalar
-    correct_solution = y_true[i][0].item()  # Convert numpy float to Python scalar
-    print(f"Model's guess: {model_guess:.4f}, Correct solution: {correct_solution:.4f}")
+    # Fit the model
+    history = model.fit(X_train_noisy, y_train, epochs=10, batch_size=32, validation_split=0.2, callbacks=[early_stopping])
 
-# Reshape y_pred to 2D
-y_pred_2d = y_pred[:, -1, 0]  # Taking the last timestep and first feature
+    # Predictions
+    predicted_stock_price = model.predict(X_test)
+    predicted_stock_price_2d = predicted_stock_price.reshape(-1, predicted_stock_price.shape[2])
+    predicted_stock_price_inversed = scaler.inverse_transform(predicted_stock_price_2d)
+    predicted_stock_price = predicted_stock_price_inversed.reshape(predicted_stock_price.shape[0], predicted_stock_price.shape[1], -1)
 
-mae = mean_absolute_error(y_true, y_pred_2d)
-mse = mean_squared_error(y_true, y_pred_2d)
-rmse = np.sqrt(mse)
-r2 = r2_score(y_true, y_pred_2d)
+    # Evaluate the model using the test set
+    y_true = scaler.inverse_transform(y_test.reshape(-1, 1))
+    y_pred = predicted_stock_price[:, -1, 0]  # Taking the last timestep and first feature
 
-# Print the evaluation metrics
-print(f"MAE: {mae}") # work towards < 1%
-print(f"MSE: {mse}") # work towards 0
-print(f"RMSE: {rmse}") # work towards < 1%
-print(f"R-squared: {r2}") # work towards 1
+    # Calculate evaluation metrics for the current fold
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = np.sqrt(mse)
+    r2 = r2_score(y_true, y_pred)
+
+    # Append metrics to the lists
+    cv_mae.append(mae)
+    cv_mse.append(mse)
+    cv_rmse.append(rmse)
+    cv_r2.append(r2)
+
+# Calculate the average of the cross-validation metrics
+avg_mae = np.mean(cv_mae)
+avg_mse = np.mean(cv_mse)
+avg_rmse = np.mean(cv_rmse)
+avg_r2 = np.mean(cv_r2)
+
+# Print the average cross-validation metrics
+print(f"Average MAE: {avg_mae}")
+print(f"Average MSE: {avg_mse}")
+print(f"Average RMSE: {avg_rmse}")
+print(f"Average R-squared: {avg_r2}")
 
 
 # Print the loss and validation loss
@@ -157,7 +182,7 @@ plt.show()
 # Plot the actual vs predicted stock prices
 plt.figure(figsize=(12, 6))
 plt.plot(y_true, label='Actual Price')
-plt.plot(y_pred_2d, label='Predicted Price')
+plt.plot(y_pred, label='Predicted Price')
 plt.title('Stock Price Prediction')
 plt.ylabel('Price')
 plt.xlabel('Time Index')
