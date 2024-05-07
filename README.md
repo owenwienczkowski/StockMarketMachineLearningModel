@@ -15,8 +15,25 @@ The specific objectives of the project are to:
 
 The dataset used to train this model can be accessed here:
 https://www.kaggle.com/datasets/jacksoncrow/stock-market-dataset
-    
-Cleaning process:
+
+
+## The code is designed to predict future stock prices using historical data. It does this by:
+
+Gathering Data: It combines stock and ETF data from different files into one large dataset.
+Preparing Data: It calculates the day-to-day price changes and normalizes these values to be between 0 and 1, which helps the model learn more effectively.
+Creating Sequences: It organizes the data into sequences, each sequence being a set of consecutive days’ data, to use for predictions.
+Building a Model: It constructs a neural network model that can learn from these sequences. This model is made up of layers designed to recognize patterns in the data.
+Training the Model: The model is trained with a portion of the data, learning to predict the next day’s price change.
+Testing the Model: The model’s predictions are compared against actual data it hasn’t seen before to evaluate its performance.
+The results after running the code are metrics that tell us how well the model is performing:
+
+MAE (Mean Absolute Error): On average, the model’s predictions are off by this amount.
+MSE (Mean Squared Error): A higher value indicates that the model’s predictions are widely varied from the actual prices.
+RMSE (Root Mean Squared Error): Similar to MSE, but more representative of the actual error because it’s in the same units as the original data.
+R-squared: This tells us the percentage of the variance in the target variable that the model is able to predict.
+
+
+### Cleaning process:
 For this dataset, etfs/PRN.csv was removed for formatting reasons
 To resolve empty spaces, forward feed was used to provide the most recent value since stocks were documented chronologically.
 Outliers are removed (using z-score).
@@ -29,3 +46,5 @@ Finally, using the Adj. Close, the price difference in stock is calculated and u
 
 This allows for the machine learning model to properly train and be adequately validated.
 
+### To run the model:
+Run the "Engine.py" program. The parameters can all be adjusted to check the adaptability of the model. For simple testing, it is recommended to run the model on the largely reduced "cleaned_data_with_solution" data set as this will significantly reduce runtime (at the expense of results). If you have powerful enough hardware, feel free to run the entire "data_with_solution" data set.
